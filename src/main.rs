@@ -59,7 +59,7 @@ fn main() {
         };
         match requester::get_animelist(&user_attrib, &registered_trie) {
             Ok(anime_list) => {
-                for anime_entry in anime_list.iter() {
+                for anime_entry in anime_list {
                     if anime_entry.is_airing_today {
                         println!("***Anime {} is airing TODAY!***", anime_entry.title);
                         println!("{:?}", anime_entry);

@@ -4,6 +4,8 @@
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::prelude::*;
+use std::sync::{Mutex, Arc};
+use std::thread;
 use crate::trie::Trie;
 use crate::anime::{AnimeAttributes, UserAttributes};
 use crate::config::{TIME_DIFF_TO_JST, HOUR_IDENTIFIER};
@@ -52,7 +54,8 @@ pub fn get_animehour_diff(anime_id: i32) -> Result<i32, Box<dyn std::error::Erro
     Ok(parse_animepage_body(body))
 }
 
-fn parse_animelist_body(body: String, user_attrib: &UserAttributes, registered_words: &Trie) -> Vec<AnimeAttributes> {
+fn parse_animelist_body(body: String, user_attrib: &UserAttributes, 
+            registered_words: &Trie) -> Vec<Arc<Mutex<Vec<AnimeAttributes>>>> {
     // split the body of the html file by end of line
     // character. Then, traverse through the vector
     // and seek for <table class="list-table" data-items="[
@@ -74,15 +77,25 @@ fn parse_animelist_body(body: String, user_attrib: &UserAttributes, registered_w
     }
     tokenized_body = raw_anime_list.split("&quot;").collect(); 
     let mut index = 0;
-    let mut anime_list: Vec<AnimeAttributes> = Vec::new();
+
+    let mut anime_list: Vec<Arc<Mutex<Vec<AnimeAttributes>>>> = Vec::new();
     let mut current_anime_entry = AnimeAttributes::new();
+    let mut current_chunk: Vec<AnimeAttributes> = Vec::new();
     let mut ignore_enabled = false;
+
+    let num_threads: usize = 4;
+    let chunk_size: usize = std::cmp::max(1, anime_list.len() / num_threads);
+
     while index < tokenized_body.len() {
         let token = tokenized_body[index]; 
         
         if !ignore_enabled && (token == "}" || token == "},{") {
             // this concludes an anime entry.
-            anime_list.push(current_anime_entry.clone());
+            current_chunk.push(current_anime_entry);
+            if (index + 1) % chunk_size == 0 {
+                anime_list.push(Arc::new(Mutex::new(current_chunk)));
+                current_chunk = Vec::new();
+            }
             current_anime_entry = AnimeAttributes::new();
         } else if token == ":[{" || token == ":{" {
             ignore_enabled = true;
@@ -90,13 +103,15 @@ fn parse_animelist_body(body: String, user_attrib: &UserAttributes, registered_w
             ignore_enabled = false;
         } else if !ignore_enabled && registered_words.contains_word(token){
             // check if this word is registered.
-            match current_anime_entry.register_attrib(user_attrib, token, tokenized_body[index + 1], tokenized_body[index + 2]) {
+            match current_anime_entry.register_attrib(user_attrib, token, 
+                        tokenized_body[index + 1], tokenized_body[index + 2]) {
                 Ok(i_forward) => {
                     index += i_forward;
                 },
                 Err(err) => {
                     println!("Error occured: {}", err);
-                    panic!("Error while inserting following token: {}, index:{} len:{} ", token, index, tokenized_body.len());
+                    panic!("Error while inserting following token: {}, index:{} len:{} ", 
+                            token, index, tokenized_body.len());
                 }
             }
             index += 1;
@@ -104,12 +119,40 @@ fn parse_animelist_body(body: String, user_attrib: &UserAttributes, registered_w
         
         index += 1;
     }
-    anime_list
+    anime_list 
 }
 
-pub fn get_animelist(user_attrib: &UserAttributes, registered_words: &Trie) -> Result<Vec<AnimeAttributes>, Box<dyn std::error::Error>> {
+pub fn get_animelist(user_attrib: &UserAttributes, 
+        registered_words: &Trie) -> Result<Vec<AnimeAttributes>, 
+                                           Box<dyn std::error::Error>> {
     let url = format!("https://myanimelist.net/animelist/{}?status=1", &user_attrib.uname);
     let mut res = reqwest::blocking::get(url)?;
     let body = res.text()?;
-    Ok(parse_animelist_body(body, user_attrib, registered_words))
+    let mut anime_list = parse_animelist_body(body, 
+                                              user_attrib, registered_words);
+
+    let mut result: Vec<AnimeAttributes> = Vec::new();
+    if anime_list.len() == 0 {
+        return Ok(result);
+    }
+     
+    let mut threads = Vec::new();
+    for chunk in anime_list.iter_mut() {
+        let cloned_chunk = Arc::clone(&chunk);
+        let handle = thread::spawn(move || {
+            for anime in cloned_chunk.lock().unwrap().iter_mut() {
+                anime.update_airing_date();
+            }
+        });
+        threads.push(handle);
+    }
+    for th in threads {
+        th.join().unwrap();
+    }
+    for chunk in anime_list.iter() {
+        for anime in chunk.lock().unwrap().iter() {
+            result.push(anime.clone());
+        }
+    }
+    Ok(result)
 }

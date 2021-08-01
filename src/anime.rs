@@ -48,7 +48,8 @@ pub struct AnimeAttributes {
     pub id                      : i32,
     pub num_watched_episodes    : i32,
     pub num_episodes            : i32,
-    day_num_from_monday         : i32,
+    current_day                 : i32,
+    anime_airing_day            : i32,
 
     // a day can shift based on the airing hour.
     // we need to calculate the time difference between
@@ -80,7 +81,8 @@ impl Default for AnimeAttributes {
                           is_rewatching: false, airing_status: false,
                           is_airing_today: false, title: String::new(),
                           start_date: String::new(), 
-                          day_num_from_monday: Utc::now().weekday().number_from_monday() as i32 }
+                          current_day: Utc::now().weekday().number_from_monday() as i32,
+                          anime_airing_day: 0}
     }
 }
 
@@ -122,7 +124,7 @@ impl AnimeAttributes {
             "anime_start_date_string" => {
                 // println!("***\nvalue: {}, value_rec: {}", value, value_rec);
                 self.start_date = String::from(value_rec);     
-                let mut anime_airing_day = match NaiveDate::parse_from_str(&self.start_date, &user.date_format) {
+                self.anime_airing_day = match NaiveDate::parse_from_str(&self.start_date, &user.date_format) {
                     Ok(date_parsed) => {
                         date_parsed.weekday().number_from_monday() as i32
                     },
@@ -130,11 +132,7 @@ impl AnimeAttributes {
                         NaiveDate::parse_from_str(&self.start_date, &user.date_format_backup)?.weekday().num_days_from_monday() as i32
                     }
                 };
-                if (self.day_num_from_monday - anime_airing_day).abs() <= 1 {
-                    self.shifting_day = requester::get_animehour_diff(self.id)?;
-                    anime_airing_day += self.shifting_day;
-                }
-                self.is_airing_today = self.day_num_from_monday == anime_airing_day;
+                
                 i_forward += 1;
             },
             _ => {
@@ -142,6 +140,14 @@ impl AnimeAttributes {
             }
         };
         Ok(i_forward)
+    }
+
+    pub fn update_airing_date(&mut self) {
+        if (self.current_day - self.anime_airing_day).abs() <= 1 {
+            self.shifting_day = requester::get_animehour_diff(self.id).unwrap();
+            self.anime_airing_day += self.shifting_day;
+        }
+        self.is_airing_today = self.current_day == self.anime_airing_day;
     }
 }
 
