@@ -77,7 +77,6 @@ fn parse_animelist_body(body: String, user_attrib: &UserAttributes,
     }
     tokenized_body = raw_anime_list.split("&quot;").collect(); 
     let mut index = 0;
-
     let mut anime_list: Vec<Arc<Mutex<Vec<AnimeAttributes>>>> = Vec::new();
     let mut current_anime_entry = AnimeAttributes::new();
     let mut current_chunk: Vec<AnimeAttributes> = Vec::new();
@@ -155,4 +154,6 @@ pub fn get_animelist(user_attrib: &UserAttributes,
         }
     }
     Ok(result)
+    anime_list
 }
+
