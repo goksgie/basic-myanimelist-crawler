@@ -1,9 +1,8 @@
 // write a parser here, and also get the request functions in this
 // module. So that we can call them from trie.
 
-use std::collections::HashMap;
-use std::fs::File;
 use std::io::prelude::*;
+use std::net::{TcpStream};
 use std::sync::{Mutex, Arc};
 use std::thread;
 use crate::trie::Trie;
@@ -121,9 +120,11 @@ fn parse_animelist_body(body: String, user_attrib: &UserAttributes,
     anime_list 
 }
 
+
 pub fn get_animelist(user_attrib: &UserAttributes, 
         registered_words: &Trie) -> Result<Vec<AnimeAttributes>, 
                                            Box<dyn std::error::Error>> {
+    // let res = fetch_page("https://myanimelist.net:8080");
     let url = format!("https://myanimelist.net/animelist/{}?status=1", &user_attrib.uname);
     let mut res = reqwest::blocking::get(url)?;
     let body = res.text()?;
@@ -154,6 +155,5 @@ pub fn get_animelist(user_attrib: &UserAttributes,
         }
     }
     Ok(result)
-    anime_list
 }
 

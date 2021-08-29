@@ -4,6 +4,7 @@ mod trie;
 mod anime;
 mod requester;
 mod config;
+mod dns;
 
 use trie::Trie;
 use anime::{UserAttributes, AnimeAttributes};
