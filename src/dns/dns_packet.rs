@@ -1,3 +1,4 @@
+use std::net::Ipv4Addr;
 use std::convert::{Into, From};
 use super::buffer::{ByteBuffer, ErrorType};
 
@@ -119,6 +120,9 @@ pub struct DnsHeader {
 }
 
 impl DnsHeader {
+    /// The reason why we might need a default new function for this struct
+    /// is that we might want to construct Header ourselves as we build our
+    /// query.
     pub fn new() -> Self {
         DnsHeader {
             id: 0,
@@ -167,8 +171,106 @@ impl DnsHeader {
 }
 
 
-pub struct QuestionHeader {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum QueryType {
+   UNKOWN(u16),
+   A, // 1 
+}
 
+impl From<u16> for QueryType {
+    fn from(code: u16) -> Self {
+        match code {
+            1 => Self::A,
+            _ => Self::UNKOWN(code),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[allow(dead_code)]
+pub enum DnsRecord {
+    UNKOWN {
+        domain: String,
+        qtype: QueryType,
+        class: u16,
+        data_len: u16,
+        ttl: u32,
+    },
+    A {
+        domain: String,
+        addr: Ipv4Addr,
+        ttl: u32,
+    }
+}
+
+impl DnsRecord {
+    pub fn new(buffer: &mut ByteBuffer) -> Result<Self, ErrorType> {
+        let mut domain = String::new();
+        buffer.read_qname(&mut domain)?;
+
+        let qtype = QueryType::from(buffer.read_mut_u16()?);
+        let class = buffer.read_mut_u16()?;
+        let ttl   = buffer.read_mut_u32()?;
+        let data_len = buffer.read_mut_u16()?;
+
+        match qtype {
+            QueryType::A => {
+                let raw_addr = buffer.read_mut_u32()?;
+                let addr = Ipv4Addr::new(
+                    ((raw_addr & 0xFF000000) >> 24) as u8,
+                    ((raw_addr & 0x00FF0000) >> 16) as u8,
+                    ((raw_addr & 0x0000FF00) >> 8)  as u8,
+                    (raw_addr & 0x000000FF) as u8
+                );
+                Ok(DnsRecord::A {
+                    domain,
+                    addr,
+                    ttl
+                })
+            },
+            _ => {
+                Ok(DnsRecord::UNKOWN {
+                    domain,
+                    qtype,
+                    class,
+                    data_len,
+                    ttl
+                })
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct QuestionHeader {
+    pub name: String,
+    pub qtype: QueryType,
+    pub class: u16,
+}
+
+impl QuestionHeader {
+    pub fn new(name: String, qtype: QueryType) -> Self {
+        QuestionHeader {
+            name,
+            qtype,
+            class: 1
+        }
+    }
+
+    /// This function generates a QuestionHeader from ByteBuffer.
+    /// Could have been implemented as From trait however, we cannot
+    /// take the ownership and consume the ByteBuffer.
+    pub fn read(buffer: &mut ByteBuffer) -> Result<QuestionHeader, ErrorType> {
+        let mut name = String::new();
+        buffer.read_qname(&mut name)?;
+        let qtype = QueryType::from(buffer.read_mut_u16()?); 
+        let class = buffer.read_mut_u16()?;
+        Ok(QuestionHeader {
+            name,
+            qtype,
+            class
+        })
+    }
 }
 
 
@@ -225,13 +327,50 @@ fn test_dns_hdr() {
     ];
 
     let mut buffer = ByteBuffer::new();
-    for (buff, answ) in test_queries {
+    for (buff, answ) in test_queries.iter() {
         buffer.set_buffer(buff);
         let mut hdr = DnsHeader::new();
         let ans = hdr.read_from(&mut buffer);
 
-        assert_eq!(hdr, answ);
+        assert_eq!(hdr, *answ);
         assert_eq!(ans.is_ok(), true);
 
+    }
+}
+
+
+#[test]
+fn test_dns_record() {
+    let vec_test_queries = vec![
+        (
+            vec![
+                0x06, 0x67, 0x6f, 0x6f, 0x67, 0x6c, 0x65,
+                0x03, 0x63, 0x6f, 0x6d, 0x00, 0x00, 0x01,
+                0x00, 0x01, 0xc0, 0x00, 0x00, 0x01, 0x00,
+                0x01, 0x00, 0x00, 0x01, 0x2b, 0x00, 0x04,
+                0x8e, 0xfa, 0xbb, 0x8e
+            ], 
+            (
+                QuestionHeader {
+                    name: String::from("google.com"),
+                    qtype: QueryType::A,
+                    class: 1
+                },
+                DnsRecord::A {
+                domain: String::from("google.com"),
+                addr: Ipv4Addr::new(0x8e, 0xfa, 0xbb, 0x8e),
+                ttl: 0x12b
+                }
+            )
+        ),
+    ];
+    let mut byte_buffer = ByteBuffer::new();
+    for (query_vec, query_out) in vec_test_queries.iter() {
+        byte_buffer.set_buffer(query_vec);
+        let q_hdr = QuestionHeader::read(&mut byte_buffer).unwrap();
+        assert_eq!(q_hdr, query_out.0);
+
+        let record = DnsRecord::new(&mut byte_buffer).unwrap();
+        assert_eq!(record, query_out.1);
     }
 }
