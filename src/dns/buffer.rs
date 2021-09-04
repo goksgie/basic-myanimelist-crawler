@@ -49,7 +49,7 @@ impl ByteBuffer {
         ByteBuffer { buf: [0; BUFFER_SIZE], index: 0 } 
     }
 
-    pub fn set_buffer(&mut self, buf: Vec<u8>) {
+    pub fn set_buffer(&mut self, buf: &Vec<u8>) {
         for index in 0..buf.len() {
             self.buf[index] = buf[index];
         }
@@ -169,9 +169,9 @@ impl ByteBuffer {
                 // this comparision is safe because hex codes of ascii characters
                 // do nat start with C.
                 let jump_byte = self.get_at(index + 1)? as u16;
-                let jump_offset = (((jump_byte as u16) ^ 0xC0) << 8)| jump_byte; 
+                let jump_offset = (((len as u16) ^ 0xC0) << 8) | jump_byte; 
                 index = jump_offset as usize;
-
+                println!("Jump offset: {}", index);
                 jumped = true;
                 curr_jumps += 1;
                 continue;
@@ -190,7 +190,7 @@ impl ByteBuffer {
         }
 
         if !jumped {
-            self.seek(index)?;
+            self.seek(index + 1)?;
         }
 
         Ok(())
@@ -210,16 +210,32 @@ fn test_qname() {
             0x65, 0x6c, 0x69, 0x73, 0x74, 0x03, 0x6e, 
             0x65, 0x74, 0x00  
         ], "myanimelist.net"),
+        // the following tests jumping/looping representation
+        // of domain name.
+        (vec![
+            0x0b, 0x6d, 0x79, 0x61, 0x6e, 0x69, 0x6d, 
+            0x65, 0x6c, 0x69, 0x73, 0x74, 0x03, 0x6e, 
+            0x65, 0x74, 0x00, 0xc0, 0x00  
+        ], "myanimelist.net"),
     ];
 
     let mut byte_buffer = ByteBuffer::new();
-    for (query_vec, query_out) in vec_test_queries {
+    for (query_vec, query_out) in vec_test_queries.iter() {
         let mut out_str = String::new();
         byte_buffer.set_buffer(query_vec);
         let res = byte_buffer.read_qname(&mut out_str);
         assert_eq!(res.is_ok(), true);
         assert_eq!(query_out, &out_str);
-        assert_eq!(byte_buffer.get_index(), query_out.len() + 1);
-
+        // we compare with length + 2 because we have to perfrom a
+        // dummy read at the end of read_qname since after domain
+        // name comes 0x00 to indicate termination.
+        assert_eq!(byte_buffer.get_index(), query_out.len() + 2);
     }
+
+    // the last test case is special. If we continue to read, we should
+    // obtain the same domain name again. 
+    let mut out_str = String::new();
+    let res = byte_buffer.read_qname(&mut out_str);
+    assert_eq!(res.is_ok(), true);
+    assert_eq!(vec_test_queries.last().unwrap().1, out_str);
 }
