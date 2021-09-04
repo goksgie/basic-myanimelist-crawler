@@ -31,6 +31,7 @@ impl fmt::Debug for ErrorType {
 const BUFFER_SIZE: usize = 512;
 
 
+#[derive(Debug)]
 pub struct ByteBuffer {
     /// A typical DNS query's length is 512 bytes.
     buf: [u8; BUFFER_SIZE],

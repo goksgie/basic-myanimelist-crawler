@@ -78,44 +78,44 @@ impl From<u8> for ResponseCode {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DnsHeader {
     /// The header itself should be 12 bytes in total.
-    id: u16,
-    qr: HeaderType,
-    opcode: OperationCode,
+    pub id: u16,
+    pub qr: HeaderType,
+    pub opcode: OperationCode,
 
     /// Authoritative answer:
-    is_auth_answer: bool,
+    pub is_auth_answer: bool,
 
     /// If the message length exceeds 512, this flag
     /// is set to true. It is a hint to use TCP for
     /// request. 
-    is_truncated: bool,
+    pub is_truncated: bool,
 
     /// Set by sender. It is an indicator for server
     /// to search the answer recursively if it is not
     /// known to it.
-    should_recurse: bool,
+    pub should_recurse: bool,
 
     /// Set by the server. Indicates if recursive queries
     /// are allowed or not.
-    recursion_available: bool,
+    pub recursion_available: bool,
 
     /// originally 3 bits and reserved for later use. Currently
     /// used for DNSSEC queries.
-    z_flag: bool, 
+    pub z_flag: bool, 
 
-    response_code: ResponseCode,
+    pub response_code: ResponseCode,
 
     /// the number of entries in the question section
-    question_count: u16,
+    pub question_count: u16,
 
     /// the number of entries in the answer section
-    answer_count: u16,
+    pub answer_count: u16,
 
     /// the number of entries in the authority section
-    authority_count: u16,
+    pub authority_count: u16,
 
     /// the number of entries in the additional section
-    additional_count: u16 
+    pub additional_count: u16 
 
 }
 
@@ -143,30 +143,31 @@ impl DnsHeader {
     }
     /// This function read from the buffer. The exact location of byte ordering
     /// can be found in any DNS related documents.
-    pub fn read_from(&mut self, buffer: &mut ByteBuffer) -> Result<(), ErrorType> {        
-        self.id = buffer.read_mut_u16()?;
-
+    pub fn read(buffer: &mut ByteBuffer) -> Result<Self, ErrorType> {        
+        let id = buffer.read_mut_u16()?;
         let flags = buffer.read_mut_u16()?;
 
         let f_left = (flags >> 8) as u8;
         let f_right = (flags & 0x00FF) as u8;
-        
-        self.qr = HeaderType::from(f_left >> 7);
-        self.opcode = OperationCode::from((f_left >> 3) & 0x0F);
-        self.is_auth_answer = ((f_left << 1) & 0x0F) & 0x08 == 8;
-        self.is_truncated = ((f_left << 1) & 0x0F) & 0x04 == 4;
-        self.should_recurse = ((f_left << 1) & 0x0F) & 0x02 == 2;
 
-        self.recursion_available = f_right >> 7 == 1;
-        self.z_flag = ((f_right & 0x70) >> 4) > 0;
-        self.response_code = ResponseCode::from(f_right & 0x0F); 
-        
-        self.question_count = buffer.read_mut_u16()?;
-        self.answer_count = buffer.read_mut_u16()?;
-        self.authority_count = buffer.read_mut_u16()?;
-        self.additional_count = buffer.read_mut_u16()?;
+        Ok(DnsHeader {
+            id,
+            qr: HeaderType::from(f_left >> 7),
+            opcode: OperationCode::from((f_left >> 3) & 0x0F),
+            is_auth_answer: ((f_left << 1) & 0x0F) & 0x08 == 8,
+            is_truncated: ((f_left << 1) & 0x0F) & 0x04 == 4,
+            should_recurse: ((f_left << 1) & 0x0F) & 0x02 == 2,
 
-        Ok(())
+            recursion_available: f_right >> 7 == 1,
+            z_flag: ((f_right & 0x70) >> 4) > 0,
+            response_code: ResponseCode::from(f_right & 0x0F), 
+            
+            question_count: buffer.read_mut_u16()?,
+            answer_count: buffer.read_mut_u16()?,
+            authority_count: buffer.read_mut_u16()?,
+            additional_count: buffer.read_mut_u16()?,
+        }
+        )
     }
 }
 
@@ -204,7 +205,7 @@ pub enum DnsRecord {
 }
 
 impl DnsRecord {
-    pub fn new(buffer: &mut ByteBuffer) -> Result<Self, ErrorType> {
+    pub fn read(buffer: &mut ByteBuffer) -> Result<Self, ErrorType> {
         let mut domain = String::new();
         buffer.read_qname(&mut domain)?;
 
@@ -274,6 +275,64 @@ impl QuestionHeader {
 }
 
 
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DnsPacket {
+    pub header: DnsHeader,
+    pub questions: Vec<QuestionHeader>,
+    pub answers : Vec<DnsRecord>,
+    pub authorities: Vec<DnsRecord>,
+    pub resources: Vec<DnsRecord>,
+}
+
+
+impl DnsPacket {
+    pub fn new() -> Self {
+        DnsPacket {
+            header: DnsHeader::new(),
+            questions: Vec::new(),
+            answers: Vec::new(),
+            authorities: Vec::new(),
+            resources: Vec::new(),
+        }
+    }
+}
+
+impl From<ByteBuffer> for DnsPacket {
+    fn from(mut buffer: ByteBuffer) -> Self {
+        let header: DnsHeader = DnsHeader::read(&mut buffer).unwrap();
+
+        let mut questions = Vec::new();
+        for _ in 0..header.question_count {
+            questions.push(QuestionHeader::read(&mut buffer).unwrap());
+        }
+
+        let mut answers = Vec::new();
+        for _ in 0..header.answer_count {
+            answers.push(DnsRecord::read(&mut buffer).unwrap());
+        }
+
+        let mut authorities = Vec::new();
+        for _ in 0..header.authority_count {
+            authorities.push(DnsRecord::read(&mut buffer).unwrap());
+        }
+
+        let mut resources = Vec::new();
+        for _ in 0..header.additional_count {
+            resources.push(DnsRecord::read(&mut buffer).unwrap());
+        }
+
+        DnsPacket {
+            header,
+            questions,
+            answers,
+            authorities,
+            resources,
+        }
+    }
+}
+
+
 #[test]
 fn test_convertions() {
     let rp = ResponseCode::from(4);
@@ -329,11 +388,10 @@ fn test_dns_hdr() {
     let mut buffer = ByteBuffer::new();
     for (buff, answ) in test_queries.iter() {
         buffer.set_buffer(buff);
-        let mut hdr = DnsHeader::new();
-        let ans = hdr.read_from(&mut buffer);
+        let ans = DnsHeader::read(&mut buffer);
 
-        assert_eq!(hdr, *answ);
         assert_eq!(ans.is_ok(), true);
+        assert_eq!(ans.unwrap(), *answ);
 
     }
 }
@@ -370,7 +428,58 @@ fn test_dns_record() {
         let q_hdr = QuestionHeader::read(&mut byte_buffer).unwrap();
         assert_eq!(q_hdr, query_out.0);
 
-        let record = DnsRecord::new(&mut byte_buffer).unwrap();
+        let record = DnsRecord::read(&mut byte_buffer).unwrap();
         assert_eq!(record, query_out.1);
     }
+}
+
+#[test]
+fn test_dns_packet() {
+    let byte_vec = vec![
+        0xc5, 0x09, 0x81, 0x80, 0x00, 0x01, 0x00, 
+        0x01, 0x00, 0x00, 0x00, 0x00, 0x06, 0x67, 
+        0x6f, 0x6f, 0x67, 0x6c, 0x65, 0x03, 0x63, 
+        0x6f, 0x6d, 0x00, 0x00, 0x01, 0x00, 0x01, 
+        0xc0, 0x0c, 0x00, 0x01, 0x00, 0x01, 0x00, 
+        0x00, 0x01, 0x2b, 0x00, 0x04, 0x8e, 0xfa, 
+        0xbb, 0x8e
+    ];
+    let mut byte_buffer = ByteBuffer::new();
+
+    byte_buffer.set_buffer(&byte_vec);
+
+    let dns_packet = DnsPacket::from(byte_buffer);
+    assert_eq!(dns_packet, DnsPacket {
+        header: DnsHeader {
+                id: 50441,
+                qr: HeaderType::Response,
+                opcode: OperationCode::StandardQuery,
+                is_auth_answer: false,
+                is_truncated: false,
+                should_recurse: true,
+                recursion_available: true,
+                z_flag: false,
+                response_code: ResponseCode::Success,
+                question_count: 1,
+                answer_count: 1,
+                authority_count: 0,
+                additional_count: 0,
+        },
+        questions: vec![
+            QuestionHeader {
+                name: String::from("google.com"),
+                qtype: QueryType::A,
+                class: 1
+            }
+        ],
+        answers: vec![
+            DnsRecord::A {
+                domain: String::from("google.com"),
+                addr: Ipv4Addr::new(0x8e, 0xfa, 0xbb, 0x8e),
+                ttl: 0x12b
+            }
+        ],
+        authorities: Vec::new(),
+        resources: Vec::new()
+    })
 }
