@@ -171,7 +171,6 @@ impl ByteBuffer {
                 let jump_byte = self.get_at(index + 1)? as u16;
                 let jump_offset = (((len as u16) ^ 0xC0) << 8) | jump_byte; 
                 index = jump_offset as usize;
-                println!("Jump offset: {}", index);
                 jumped = true;
                 curr_jumps += 1;
                 continue;
@@ -191,6 +190,10 @@ impl ByteBuffer {
 
         if !jumped {
             self.seek(index + 1)?;
+        } else {
+            // if we haven't jumped, we need to increment our current index by two,
+            // as we read one u16 
+            self.seek(self.index + 2)?;
         }
 
         Ok(())
@@ -238,4 +241,23 @@ fn test_qname() {
     let res = byte_buffer.read_qname(&mut out_str);
     assert_eq!(res.is_ok(), true);
     assert_eq!(vec_test_queries.last().unwrap().1, out_str);
+    assert_eq!(byte_buffer.get_index(), out_str.len() + 4);
+}
+
+#[test]
+fn test_byte_reads() {
+    let vec_test_queries = vec![
+        (
+            vec![
+                0x00, 0x00, 0x01, 0x2b
+            ],
+            0x0000012b as u32
+        )
+    ];
+
+    let mut byte_buffer = ByteBuffer::new();
+    for (query_vec, query_out) in vec_test_queries.iter() {
+        byte_buffer.set_buffer(query_vec);
+        assert_eq!(byte_buffer.read_mut_u32().unwrap(), *query_out);
+    }
 }
