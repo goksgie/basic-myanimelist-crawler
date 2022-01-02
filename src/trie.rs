@@ -78,9 +78,9 @@ fn test_single_insert() {
 
 #[test]
 fn test_multiple_insert() {
-    let words = vec!["status", "score", "is_rewatching", "anime_num_episodes",
+    let words = vec!["status", "score", "is_rewatching", 
                      "anime_airing_status", "anime_id", "anime_title",
-                     "start_date_string"];
+                     "anime_start_date_string", "anime_num_episodes"];
     let mut trie = Trie::new(Some(&words));
     for word in words.iter() {
         trie.insert_word(&word);
@@ -93,4 +93,5 @@ fn test_multiple_insert() {
     assert_eq!(trie.contains_word("start_date_stringg"), false);
     assert_eq!(trie.contains_word("start_date_strin"), false);
     assert_eq!(trie.contains_word("start_"), false);
+    assert_eq!(trie.contains_word("anime_airing_status"), true);
 }

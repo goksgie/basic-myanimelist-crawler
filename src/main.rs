@@ -17,6 +17,7 @@ fn main() {
     // this operation.
     let registered_words = vec!["status", "score", "is_rewatching", 
                                 "anime_airing_status", "anime_id", "anime_title",
+                                "anime_title_eng",
                                 "anime_start_date_string", "anime_num_episodes"];
     let registered_trie = Trie::new(Some(&registered_words)); 
     
@@ -57,13 +58,13 @@ fn main() {
                 continue;
             }
         };
+        
+        // print the user's watch list with attributes.
         match requester::get_animelist(&user_attrib, &registered_trie) {
             Ok(anime_list) => {
+                println!("{:<150} {:<20} {:<10}", "Anime Name", "Airing Today", "Finished");
                 for anime_entry in anime_list {
-                    if anime_entry.is_airing_today {
-                        println!("***Anime {} is airing TODAY!***", anime_entry.title);
-                        println!("{:?}", anime_entry);
-                    }
+                    println!("{:<150} {:<20} {:<10}", anime_entry.title, anime_entry.is_airing_today(), anime_entry.is_finished());
                 }
             },
             Err(err) => {
